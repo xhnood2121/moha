@@ -1,0 +1,282 @@
+// Raqman — Saudi e-commerce intelligence platform.
+// All data sourced legitimately: (a) merchant-consented OAuth installs,
+// (b) polite, robots-respecting public catalog crawl, (c) bug-report tooling.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth ──────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  passwordHash  String?
+  locale        String    @default("ar")
+  role          UserRole  @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  subscriptions Subscription[]
+  merchants     Merchant[]
+  bugReports    BugReport[]
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Subscriptions / paywall ──────────────────────────────────────────────
+
+model Subscription {
+  id        String           @id @default(cuid())
+  userId    String
+  plan      SubscriptionPlan @default(FREE)
+  status    SubscriptionStatus @default(ACTIVE)
+  startedAt DateTime         @default(now())
+  endsAt    DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+// ─── Merchant OAuth integrations (Path A) ─────────────────────────────────
+// Merchants who install Raqman on Salla / Zid via official OAuth.
+
+model Merchant {
+  id           String           @id @default(cuid())
+  userId       String
+  platform     MerchantPlatform
+  externalId   String
+  storeName    String
+  storeDomain  String?
+  installedAt  DateTime         @default(now())
+  uninstalledAt DateTime?
+  scopes       String[]
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens      MerchantToken[]
+  orderEvents OrderEvent[]
+
+  @@unique([platform, externalId])
+  @@index([userId])
+}
+
+enum MerchantPlatform {
+  SALLA
+  ZID
+}
+
+model MerchantToken {
+  id           String   @id @default(cuid())
+  merchantId   String
+  accessToken  String   @db.Text
+  refreshToken String?  @db.Text
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+}
+
+// Orders received via authenticated webhooks from a merchant who installed us.
+// Visible only to that merchant. Not used for cross-merchant aggregates.
+model OrderEvent {
+  id              String   @id @default(cuid())
+  merchantId      String
+  externalOrderId String
+  eventType       String
+  totalMinor      Int
+  currency        String   @default("SAR")
+  itemCount       Int      @default(0)
+  occurredAt      DateTime
+  payloadHash     String
+  receivedAt      DateTime @default(now())
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, externalOrderId, eventType])
+  @@index([merchantId, occurredAt])
+}
+
+// ─── Public market intelligence (Path B) ──────────────────────────────────
+// Polite, robots-respecting crawl of public storefronts. Catalog only.
+
+model PublicStore {
+  id              String   @id @default(cuid())
+  platform        MerchantPlatform
+  domain          String   @unique
+  storeName       String?
+  category        String?
+  isActive        Boolean  @default(true)
+  isClosed        Boolean  @default(false)
+  isDuplicate     Boolean  @default(false)
+  duplicateOf     String?
+  robotsAllowsUs  Boolean  @default(true)
+  lastCrawledAt   DateTime?
+  firstSeenAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  products PublicProduct[]
+
+  @@index([platform, isActive])
+  @@index([category])
+}
+
+model PublicProduct {
+  id            String   @id @default(cuid())
+  storeId       String
+  externalId    String
+  slug          String?
+  name          String
+  category      String?
+  priceMinor    Int?
+  currency      String   @default("SAR")
+  isAvailable   Boolean  @default(true)
+  publicReviews Int?
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+
+  store         PublicStore           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  priceHistory  PublicPricePoint[]
+
+  @@unique([storeId, externalId])
+  @@index([storeId, category])
+}
+
+model PublicPricePoint {
+  id          String   @id @default(cuid())
+  productId   String
+  priceMinor  Int
+  isAvailable Boolean
+  observedAt  DateTime @default(now())
+
+  product PublicProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, observedAt])
+}
+
+// Polite crawler bookkeeping — last-fetched and robots cache per host.
+model CrawlHostState {
+  host           String   @id
+  robotsTxt      String?  @db.Text
+  robotsFetchedAt DateTime?
+  lastRequestAt  DateTime?
+  consecutiveErrors Int   @default(0)
+  blockedUntil   DateTime?
+  updatedAt      DateTime @updatedAt
+}
+
+// ─── Bug bounty disclosure toolkit (Path D) ───────────────────────────────
+
+model BugReport {
+  id          String           @id @default(cuid())
+  userId      String
+  title       String
+  severity    BugSeverity
+  status      BugReportStatus  @default(DRAFT)
+  vendor      String
+  summary     String           @db.Text
+  reproSteps  String           @db.Text
+  impact      String           @db.Text
+  remediation String           @db.Text
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+enum BugSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum BugReportStatus {
+  DRAFT
+  SUBMITTED
+  TRIAGED
+  RESOLVED
+  REJECTED
+}
+
+// ─── Audit log ─────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  resource  String?
+  meta      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}

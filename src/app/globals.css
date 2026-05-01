@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 0 0% 100%;
+  --surface: 210 20% 98%;
+  --border: 220 13% 91%;
+  --fg: 222 47% 11%;
+  --muted: 220 9% 46%;
+  --brand: 174 60% 35%;
+  --brand-fg: 0 0% 100%;
+  --danger: 0 72% 51%;
+  --success: 142 71% 45%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 222 47% 7%;
+    --surface: 222 47% 11%;
+    --border: 220 13% 22%;
+    --fg: 210 20% 98%;
+    --muted: 218 11% 65%;
+  }
+}
+
+html, body {
+  background-color: hsl(var(--bg));
+  color: hsl(var(--fg));
+}
+
+html[dir="rtl"] body {
+  font-family: var(--font-sans), "Tajawal", "Cairo", system-ui, sans-serif;
+}
