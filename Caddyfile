@@ -1,0 +1,35 @@
+# Caddy config for raqman.ai.
+# - Auto TLS via Let's Encrypt.
+# - www.raqman.ai → raqman.ai (301).
+# - gzip + zstd compression.
+# - Sensible upstream timeouts; the app server enforces its own auth.
+
+(common_headers) {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+	header Referrer-Policy "strict-origin-when-cross-origin"
+	header X-Content-Type-Options "nosniff"
+	header X-Frame-Options "DENY"
+}
+
+www.raqman.ai {
+	redir https://raqman.ai{uri} 301
+}
+
+raqman.ai {
+	encode zstd gzip
+	import common_headers
+
+	@bots path /robots.txt
+	respond @bots `User-agent: *
+Allow: /
+Sitemap: https://raqman.ai/sitemap.xml
+` 200
+
+	reverse_proxy 127.0.0.1:3000 {
+		header_up X-Forwarded-Host {host}
+		transport http {
+			read_timeout 60s
+			write_timeout 60s
+		}
+	}
+}
