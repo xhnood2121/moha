@@ -81,9 +81,33 @@ if ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
   die "postgres not reachable on 127.0.0.1:5432"
 fi
 
-PSQL_ADMIN=(psql -h 127.0.0.1 -p 5432 -U "${POSTGRES_SUPERUSER:-postgres}" -d postgres -v ON_ERROR_STOP=1)
-if [ "$OS" = "Linux" ]; then
+# Pick a superuser. Homebrew Postgres on macOS makes the OS user the
+# superuser; the Debian/Ubuntu package uses 'postgres'. Allow override
+# via POSTGRES_SUPERUSER, otherwise probe.
+choose_superuser() {
+  if [ -n "${POSTGRES_SUPERUSER:-}" ]; then
+    echo "$POSTGRES_SUPERUSER"
+    return
+  fi
+  for cand in "${USER:-}" postgres; do
+    [ -z "$cand" ] && continue
+    if psql -h 127.0.0.1 -p 5432 -U "$cand" -d postgres -tAc 'SELECT 1' >/dev/null 2>&1; then
+      echo "$cand"
+      return
+    fi
+  done
+  echo ""
+}
+
+if [ "$OS" = "Linux" ] && ! psql -h 127.0.0.1 -p 5432 -U "${USER:-}" -d postgres -tAc 'SELECT 1' >/dev/null 2>&1; then
   PSQL_ADMIN=(sudo -n -u postgres psql -d postgres -v ON_ERROR_STOP=1)
+else
+  SUPERUSER="$(choose_superuser)"
+  if [ -z "$SUPERUSER" ]; then
+    die "could not connect to postgres as $USER or postgres. Set POSTGRES_SUPERUSER and re-run."
+  fi
+  say "using postgres superuser: $SUPERUSER"
+  PSQL_ADMIN=(psql -h 127.0.0.1 -p 5432 -U "$SUPERUSER" -d postgres -v ON_ERROR_STOP=1)
 fi
 
 if ! "${PSQL_ADMIN[@]}" -tAc "SELECT 1 FROM pg_roles WHERE rolname='raqman'" 2>/dev/null | grep -q 1; then
