@@ -11,8 +11,13 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts",
+    "setup": "bash scripts/setup-local.sh",
     "crawl:public": "tsx workers/crawl-public.ts",
     "ingest:webhooks": "tsx workers/ingest-webhooks.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.4",
